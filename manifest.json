@@ -1,0 +1,11 @@
+{
+  "name": "Test Extension",
+  "description": "Base Level Extension",
+  "version": "1.0",
+  "manifest_version": 3,
+  "permissions": ["scripting", "activeTab"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "action": {
+    "default_popup": "hello.html"
+  }
+}
