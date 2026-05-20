@@ -6,14 +6,14 @@
   "permissions": ["activeTab", "storage"],
   "host_permissions": ["https://www.linkedin.com/*", "https://*/*"],
   "action": {
-    "default_popup": "index.html",
-    "default_icon": "icon.png"
+    "default_popup": "popup/index.html",
+    "default_icon": "images/icon.png"
   },
-  "options_page": "options.html",
+  "options_page": "options/options.html",
   "content_scripts": [
     {
       "matches": ["https://www.linkedin.com/*/*/recent-activity/comments/"],
-      "js": ["content-script.js"],
+      "js": ["scripts/content-script.js"],
       "run_at": "document_idle"
     }
   ]
