@@ -1,15 +1,99 @@
-const scrapeButton = document.getElementById("scrape-btn");
-const statusEl = document.getElementById("status");
-const outputEl = document.getElementById("output");
+const ui = {
+  scrapeButton: document.getElementById("scrape-btn"),
+  statusEl: document.getElementById("status"),
+  outputEl: document.getElementById("output"),
+  skipInput: document.getElementById("skip-input"),
+  limitInput: document.getElementById("limit-input"),
+};
+
+const STORAGE_KEYS = {
+  webhookUrl: "linkedinWebhookUrl",
+  apiToken: "linkedinApiToken",
+};
+
+const toNonNegativeInt = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
 
 const setStatus = (message) => {
-  statusEl.textContent = message;
+  ui.statusEl.textContent = message;
+};
+
+const isValidWebhookUrl = (value) => {
+  if (!value) {
+    return true;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:";
+  } catch (error) {
+    return false;
+  }
+};
+
+const readOptions = () => {
+  const skip = toNonNegativeInt(ui.skipInput.value);
+  const limit = toNonNegativeInt(ui.limitInput.value);
+  return { skip, limit };
+};
+
+const loadSettings = async () => {
+  const stored = await chrome.storage.sync.get([
+    STORAGE_KEYS.webhookUrl,
+    STORAGE_KEYS.apiToken,
+  ]);
+
+  return {
+    webhookUrl:
+      typeof stored[STORAGE_KEYS.webhookUrl] === "string"
+        ? stored[STORAGE_KEYS.webhookUrl].trim()
+        : "",
+    apiToken:
+      typeof stored[STORAGE_KEYS.apiToken] === "string"
+        ? stored[STORAGE_KEYS.apiToken].trim()
+        : "",
+  };
+};
+
+const sendToWebhook = async (webhookUrl, payload, apiToken) => {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (apiToken) {
+    headers.Authorization = `Bearer ${apiToken}`;
+  }
+
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    const message = responseText ? responseText.slice(0, 200) : "";
+    throw new Error(
+      `Webhook error: ${response.status} ${message || response.statusText}`,
+    );
+  }
 };
 
 const runScrape = async () => {
-  outputEl.value = "";
-  setStatus("Scraping posts...");
-  scrapeButton.disabled = true;
+  ui.outputEl.value = "";
+  const { skip, limit } = readOptions();
+  const limitLabel = limit > 0 ? limit : "all";
+  const { webhookUrl, apiToken } = await loadSettings();
+
+  if (!isValidWebhookUrl(webhookUrl)) {
+    setStatus("Webhook URL must start with https.");
+    return;
+  }
+
+  setStatus(`Scraping posts (skip ${skip}, limit ${limitLabel})...`);
+  ui.scrapeButton.disabled = true;
 
   try {
     const [tab] = await chrome.tabs.query({
@@ -17,119 +101,56 @@ const runScrape = async () => {
       currentWindow: true,
     });
 
-    if (!tab || !tab.id) {
+    if (!tab?.id) {
       setStatus("No active tab found.");
       return;
     }
 
-    const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: scrapeLinkedInPosts,
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      type: "SCRAPE_LINKEDIN_COMMENTS",
+      options: { skip, limit },
     });
 
-    const posts = results?.[0]?.result || [];
-    outputEl.value = JSON.stringify(posts, null, 2);
-    setStatus(`Found ${posts.length} posts.`);
+    if (!response?.ok) {
+      throw new Error(response?.error || "No response from content script.");
+    }
+
+    const posts = response.data || [];
+    ui.outputEl.value = JSON.stringify(posts, null, 2);
+
+    let webhookNote = "";
+    if (webhookUrl) {
+      setStatus(`Sending ${posts.length} posts to webhook...`);
+      try {
+        await sendToWebhook(
+          webhookUrl,
+          {
+            scrapedAt: new Date().toISOString(),
+            sourceUrl: tab.url || "",
+            options: { skip, limit },
+            count: posts.length,
+            items: posts,
+          },
+          apiToken,
+        );
+        webhookNote = " Sent to webhook.";
+      } catch (error) {
+        console.error(error);
+        webhookNote = " Webhook failed.";
+      }
+    }
+
+    setStatus(`Found ${posts.length} posts.${webhookNote}`);
   } catch (error) {
     console.error(error);
-    setStatus("Scrape failed. Open LinkedIn feed and try again.");
+    if (String(error?.message).includes("Receiving end does not exist")) {
+      setStatus("Open a LinkedIn comments activity page and try again.");
+    } else {
+      setStatus("Scrape failed. Open LinkedIn and try again.");
+    }
   } finally {
-    scrapeButton.disabled = false;
+    ui.scrapeButton.disabled = false;
   }
 };
 
-scrapeButton.addEventListener("click", runScrape);
-
-function scrapeLinkedInPosts() {
-  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  const scrollToEndUntilStable = async () => {
-    let lastHeight = document.documentElement.scrollHeight;
-    let stableTicks = 0;
-    const maxIterations = 30;
-
-    for (let i = 0; i < maxIterations; i += 1) {
-      window.scrollTo({
-        top: document.documentElement.scrollHeight,
-        behavior: "smooth",
-      });
-
-      await delay(1200);
-      const newHeight = document.documentElement.scrollHeight;
-
-      if (newHeight <= lastHeight + 5) {
-        stableTicks += 1;
-      } else {
-        stableTicks = 0;
-      }
-
-      lastHeight = newHeight;
-
-      if (stableTicks >= 3) {
-        break;
-      }
-    }
-  };
-
-  const extractJoinedText = (ltrElement) => {
-    const parts = [];
-
-    ltrElement.childNodes.forEach((node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        parts.push(node.textContent || "");
-        return;
-      }
-
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        if (node.tagName === "BR") {
-          parts.push("\n");
-        } else {
-          parts.push(node.textContent || "");
-        }
-      }
-    });
-
-    return parts
-      .join("")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-  };
-
-  const buildPosts = () => {
-    const seen = new Set();
-    const items = [];
-
-    document.querySelectorAll("[data-urn]").forEach((element) => {
-      const dataUrnValue = element.dataset.urn;
-      console.log("Found element with data-urn:", dataUrnValue);
-      if (!dataUrnValue || seen.has(dataUrnValue)) {
-        return;
-      }
-
-      const ltrElement = element.querySelector(
-        "span.break-words span[dir=ltr]",
-      );
-      if (!ltrElement) {
-        return;
-      }
-
-      const joinedPost = extractJoinedText(ltrElement);
-      if (!joinedPost) {
-        return;
-      }
-
-      seen.add(dataUrnValue);
-      items.push({
-        url: `https://www.linkedin.com/feed/update/${dataUrnValue}`,
-        post: joinedPost,
-      });
-    });
-
-    return items;
-  };
-
-  return (async () => {
-    await scrollToEndUntilStable();
-    return buildPosts();
-  })();
-}
+ui.scrapeButton.addEventListener("click", runScrape);

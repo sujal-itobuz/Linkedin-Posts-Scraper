@@ -9,6 +9,16 @@
   <body>
     <div id="app">
       <h1>LinkedIn Scraper</h1>
+      <div class="fields">
+        <label class="field">
+          <span>Skip</span>
+          <input id="skip-input" type="number" min="0" value="0" />
+        </label>
+        <label class="field">
+          <span>Limit</span>
+          <input id="limit-input" type="number" min="0" value="50" />
+        </label>
+      </div>
       <button id="scrape-btn" type="button">Scrape posts</button>
       <p id="status" role="status">Ready.</p>
       <textarea
