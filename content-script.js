@@ -49,17 +49,35 @@ const buildEntries = () => {
     const profileElement = element.querySelector(
       ".update-components-actor__meta-link",
     );
-    const profileUrl = profileElement?.href;
-    const profileName = profileElement
-      .querySelector("span[dir='ltr'] span")
-      ?.textContent?.trim();
-    const description = element
-      .querySelector(".update-components-actor__description")
-      .textContent?.trim();
-    const relativeTime = element
-      .querySelector(".update-components-actor__sub-description span")
-      ?.textContent?.trim()
-      .split(" ")[0];
+    let profileUrl = "";
+    let profileName = "";
+    let description = "";
+    let relativeTime = "";
+
+    if (profileElement) {
+      profileUrl = profileElement.href || "";
+      const nameElement = profileElement.querySelector("span[dir='ltr'] span");
+      if (nameElement) {
+        profileName = nameElement.textContent?.trim() || "";
+      }
+    }
+
+    const descriptionElement = element.querySelector(
+      ".update-components-actor__description",
+    );
+    if (descriptionElement) {
+      description = descriptionElement.textContent?.trim() || "";
+    }
+
+    const timeElement = element.querySelector(
+      ".update-components-actor__sub-description span",
+    );
+    if (timeElement) {
+      const timeText = timeElement.textContent?.trim();
+      if (timeText) {
+        relativeTime = timeText.split(" ")[0] || "";
+      }
+    }
 
     const joinedPost = extractJoinedText(ltrElement);
     if (!joinedPost) {
